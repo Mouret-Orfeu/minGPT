@@ -50,17 +50,6 @@ def generate(use_mingpt, model_type, prompt, device, model, steps=20, do_sample=
     return out
 
 
-
-def _safe_get_device():
-    """Return 'cuda' if available, otherwise 'cpu'. Never raise due to CUDA issues."""
-    try:
-        return 'cuda' if torch.cuda.is_available() else 'cpu'
-    except Exception as e:
-        # In some environments torch.cuda.is_available() can raise OSError(EIO)
-        print(f"Warning: torch.cuda.is_available() failed: {e}")
-        return 'cpu'
-
-
 @lru_cache(maxsize=1)
 def _load_model_cached(use_mingpt: bool, model_type: str):
     """Load and cache the model to avoid re-initialization on every call."""
@@ -69,7 +58,7 @@ def _load_model_cached(use_mingpt: bool, model_type: str):
     else:
         model = GPT2LMHeadModel.from_pretrained(model_type)
         model.config.pad_token_id = model.config.eos_token_id  # suppress a warning
-    device = _safe_get_device()
+    device = 'cpu'
     model.to(device)
     model.eval()
     return model, device
@@ -86,7 +75,7 @@ def get_reply(user_message):
         use_mingpt=use_mingpt,
         model_type=model_type,
         prompt=user_message,
-        device=device,
+        device="cpu",
         model=model,
         steps=20,
         do_sample=True,
@@ -97,4 +86,4 @@ def get_reply(user_message):
 
 
 # DEBUG
-#print("reply: ", get_reply("hello, I am"))
+print("reply: ", get_reply("hello, I am"))
