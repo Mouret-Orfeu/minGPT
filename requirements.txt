@@ -2,5 +2,10 @@ regex
 requests
 numpy
 torch
-ipkernel
+ipykernel
 transformers
+python-dotenv
+streamlit
+streamlit-chat
+selenium
+openai
