@@ -10,6 +10,7 @@ import torch
 
 # -----------------------------------------------------------------------------
 
+# initialize all seeds you might need so that every run is deterministic
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)

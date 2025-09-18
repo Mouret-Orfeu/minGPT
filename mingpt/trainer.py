@@ -33,6 +33,8 @@ class Trainer:
         self.model = model
         self.optimizer = None
         self.train_dataset = train_dataset
+
+        # List of callable objects (basically list of callback functions) for different events
         self.callbacks = defaultdict(list)
 
         # determine the device we'll train on
@@ -54,8 +56,11 @@ class Trainer:
     def set_callback(self, onevent: str, callback):
         self.callbacks[onevent] = [callback]
 
+    
     def trigger_callbacks(self, onevent: str):
+        # Looks up the list of functions registered for "onevent", for each "onevent"
         for callback in self.callbacks.get(onevent, []):
+            # run the callback function associated with that event
             callback(self)
 
     def run(self):

@@ -1,0 +1,6 @@
+regex
+requests
+numpy
+torch
+ipkernel
+transformers

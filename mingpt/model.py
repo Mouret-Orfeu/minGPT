@@ -37,12 +37,12 @@ class CausalSelfAttention(nn.Module):
         super().__init__()
         assert config.n_embd % config.n_head == 0
         # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
+        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd) #3 matrices de taille n_embd x n_embd
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
         # regularization
-        self.attn_dropout = nn.Dropout(config.attn_pdrop)
-        self.resid_dropout = nn.Dropout(config.resid_pdrop)
+        self.attn_dropout = nn.Dropout(config.attn_pdrop) # dropout after on attention weigts after softmax
+        self.resid_dropout = nn.Dropout(config.resid_pdrop) # dropout before residual connection
         # causal mask to ensure that attention is only applied to the left in the input sequence
         self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                      .view(1, 1, config.block_size, config.block_size))
@@ -53,15 +53,18 @@ class CausalSelfAttention(nn.Module):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        # We want h = n_head heads, each of size hs = C // h. So we first split the channel dim into (h, hs) and then move the head dim forward:
         q, k ,v  = self.c_attn(x).split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs) (nh = num head, hs = head size)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
-        att = F.softmax(att, dim=-1)
+        # Putting h up front lets us treat heads like an extra batch dimension
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1))) # Scaled dot-product attention (per head)
+
+        att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf')) # annule le poids d'influence des tokens futurs
+        att = F.softmax(att, dim=-1) # softmax pour avoir les scores d'attention
         att = self.attn_dropout(att)
         y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
@@ -88,7 +91,7 @@ class Block(nn.Module):
         self.mlpf = lambda x: m.dropout(m.c_proj(m.act(m.c_fc(x)))) # MLP forward
 
     def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
+        x = x + self.attn(self.ln_1(x)) # x + c'est la connexion residuelle, et ln_1(x) et ln_2(x) sont des normalisations de layer
         x = x + self.mlpf(self.ln_2(x))
         return x
 
@@ -193,12 +196,24 @@ class GPT(nn.Module):
         sd_hf = model_hf.state_dict()
 
         # copy while ensuring all of the parameters are aligned and match in names and shapes
-        keys = [k for k in sd_hf if not k.endswith('attn.masked_bias')] # ignore these
+        sd_hf_keys = [k for k in sd_hf if not k.endswith('attn.masked_bias')] # ignore these 
         transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
+
+        sd_keys = [k for k in sd if not k.endswith('.attn.bias')] # ignore these too
         # basically the openai checkpoints use a "Conv1D" module, but we only want to use a vanilla nn.Linear.
         # this means that we have to transpose these weights when we import them
-        assert len(keys) == len(sd)
-        for k in keys:
+
+        #old check
+        #assert len(keys) == len(sd)
+
+        #New check
+        set_hf, set_local = set(sd_hf_keys), set(sd_keys)
+        assert set_hf == set_local, (
+            f"Key mismatch.\nMissing in HF: {sorted(set_local - set_hf)[:5]}\n"
+            f"Extra in HF: {sorted(set_hf - set_local)[:5]}"
+        )
+
+        for k in sd_hf_keys:
             if any(k.endswith(w) for w in transposed):
                 # special treatment for the Conv1D weights we need to transpose
                 assert sd_hf[k].shape[::-1] == sd[k].shape
@@ -275,6 +290,8 @@ class GPT(nn.Module):
         # if we are given some desired targets also calculate the loss
         loss = None
         if targets is not None:
+            # targets = the index of the correct next token at each position
+            # Internally performs log_softmax on the logits, then negative log-likelihood of the target class
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
 
         return logits, loss
@@ -287,12 +304,14 @@ class GPT(nn.Module):
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
         for _ in range(max_new_tokens):
-            # if the sequence context is growing too long we must crop it at block_size
+            # if the sequence context is growing too long we just take the last bit of the sequence that fits into block_size
             idx_cond = idx if idx.size(1) <= self.block_size else idx[:, -self.block_size:]
             # forward the model to get the logits for the index in the sequence
+            # appell de d'instance GPT comme une fonction (car callable grace au forward)
             logits, _ = self(idx_cond)
             # pluck the logits at the final step and scale by desired temperature
-            logits = logits[:, -1, :] / temperature
+            # sur les 3 dimensions (B, T, C) on prend juste le dernier vecteur de logits (celui du dernier token de la séquence)
+            logits = logits[:, -1, :] / temperature 
             # optionally crop the logits to only the top k options
             if top_k is not None:
                 v, _ = torch.topk(logits, top_k)

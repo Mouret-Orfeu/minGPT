@@ -21,7 +21,7 @@ def bytes_to_unicode():
     """
     Every possible byte (really an integer 0..255) gets mapped by OpenAI to a unicode
     character that represents it visually. Some bytes have their appearance preserved
-    because they don't cause any trouble. These are defined in list bs. For example:
+    because they don't cause any trouble. These are defined in list bs (the list is called bs). For example:
     chr(33) returns "!", so in the returned dictionary we simply have d[33] -> "!".
     However, chr(0), for example, is '\x00', which looks ugly. So OpenAI maps these
     bytes, into new characters in a range where chr() returns a single nice character.
@@ -162,8 +162,11 @@ class Encoder:
         """ string goes in, list of integers comes out """
         bpe_idx = []
         # pre-tokenize the input text into string tokens (words, roughly speaking)
+
+        # Enfaite là c'est pas encore des token, c'est plutôts des "mots" découpés du text avec regex
         tokens = re.findall(self.pat, text)
         # process each token into BPE integers
+        # Là on boucle sur les mots, pour en extraire les tokens maximalement mergés
         for token in tokens:
             # encode the token as a bytes (b'') object
             token_bytes = token.encode('utf-8')

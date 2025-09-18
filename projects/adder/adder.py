@@ -107,6 +107,7 @@ class AdditionDataset(Dataset):
         # calculate the "label" of the addition problem a + b
         c = a + b
         # encode the digits of a, b, c into strings
+        # (Formattage decimal avec d et padding avec des 0 au début)
         astr = f'%0{ndigit}d' % a
         bstr = f'%0{ndigit}d' % b
         cstr = (f'%0{ndigit+1}d' % c)[::-1] # reverse c to make addition easier
